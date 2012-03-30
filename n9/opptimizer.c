@@ -67,28 +67,10 @@ static char *buf;
  * This structure stores the OPP information for a given domain.
  */
 struct omap_opp {
-	struct list_head node;
-	
 	bool enabled;
 	unsigned long rate;
 	unsigned long u_volt;
-	u8 opp_id;
-	
-	struct device_opp *dev_opp;  /* containing device_opp struct */
-};
-
-struct device_opp {
-	struct list_head node;
-	
-	struct omap_hwmod *oh;
-	struct device *dev;
-	
-	struct list_head opp_list;
-	u32 opp_count;
-	u32 enabled_opp_count;
-	
-	int (*set_rate)(struct device *dev, unsigned long rate);
-	unsigned long (*get_rate) (struct device *dev);
+	u8 opp_id;	
 };
 
 static int proc_opptimizer_read(char *buffer, char **buffer_location,
@@ -98,13 +80,8 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 	unsigned long freq = ULONG_MAX;
 	struct device *dev;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
-	
-	//dev = omap2_get_mpuss_device();
+
 	dev = OPP_MPU;
-	if (!dev || IS_ERR(dev)) {
-		printk(KERN_INFO "No device \"dev\" on read.  What's going on?!");
-		return -ENODEV;
-	}
 	opp = opp_find_freq_floor_fp(dev, &freq);
 	if (IS_ERR(opp)) {
 		ret = 0;
@@ -127,12 +104,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		return -EFAULT;
 	buf[len] = 0;
 	if(sscanf(buf, "%lu", &rate) == 1) {
-		//dev = omap2_get_mpuss_device();
 		dev = OPP_MPU;
-		if (!dev || IS_ERR(dev)) {
-			printk(KERN_INFO "No device \"dev\" on write.  What's going on?!");
-			return -ENODEV;
-		}
 		opp = opp_find_freq_floor_fp(dev, &freq);
 		if (IS_ERR(opp)) {
 			return -ENODEV;
@@ -161,12 +133,7 @@ static int __init opptimizer_init(void)
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
 	
-	//dev = omap2_get_mpuss_device();
 	dev = OPP_MPU;
-	if (!dev || IS_ERR(dev)) {
-		printk(KERN_INFO "No device \"dev\" on init.  What's going on?!");
-		return -ENODEV;
-	}
 	maxdex = (opp_get_opp_count_fp(dev)-1);
 	opp = opp_find_freq_floor_fp(dev, &freq);
 	def_max_rate = opp->rate;
@@ -189,12 +156,7 @@ static void __exit opptimizer_exit(void)
 	
 	vfree(buf);
 	
-	//dev = omap2_get_mpuss_device();
 	dev = OPP_MPU;
-	if (!dev || IS_ERR(dev)) {
-		printk(KERN_INFO "No device \"dev\" on exit.  What's going on?!");
-		return;
-	}
 	opp = opp_find_freq_floor_fp(dev, &freq);
 	opp->rate = def_max_rate;
 	freq_table[maxdex].frequency = policy->max = policy->cpuinfo.max_freq =
