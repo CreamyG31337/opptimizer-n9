@@ -44,9 +44,9 @@ MODULE_DESCRIPTION(DRIVER_DESCRIPTION);
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL");
 
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_get_opp_count_fp, struct device *dev);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_get_opp_count_fp, enum opp_t opp_type);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *, 
-			opp_find_freq_floor_fp, struct device *dev, unsigned long *freq);
+			opp_find_freq_floor_fp, enum opp_t opp_type, unsigned long *freq);
 
 static int maxdex;
 static unsigned long def_max_rate;
@@ -78,11 +78,11 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 {
 	int ret = 0;
 	unsigned long freq = ULONG_MAX;
-	struct device *dev;
+	//struct device *dev;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
 
-	dev = OPP_MPU;
-	opp = opp_find_freq_floor_fp(dev, &freq);
+	//dev = OPP_MPU;
+	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	if (IS_ERR(opp)) {
 		ret = 0;
 	}
@@ -95,7 +95,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 						 unsigned long len, void *data)
 {
 	unsigned long rate, freq = ULONG_MAX;
-	struct device *dev;
+	//struct device *dev;
 	struct omap_opp *opp;
 	
 	if(!len || len >= BUF_SIZE)
@@ -104,8 +104,8 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		return -EFAULT;
 	buf[len] = 0;
 	if(sscanf(buf, "%lu", &rate) == 1) {
-		dev = OPP_MPU;
-		opp = opp_find_freq_floor_fp(dev, &freq);
+		//dev = OPP_MPU;
+		opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 		if (IS_ERR(opp)) {
 			return -ENODEV;
 		}
@@ -120,7 +120,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 static int __init opptimizer_init(void)
 {
 	unsigned long freq = ULONG_MAX;
-	struct device *dev;
+	//struct device *dev;
 	struct omap_opp *opp;
 	struct proc_dir_entry *proc_entry;
 	
@@ -133,9 +133,9 @@ static int __init opptimizer_init(void)
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
 	
-	dev = OPP_MPU;
-	maxdex = (opp_get_opp_count_fp(dev)-1);
-	opp = opp_find_freq_floor_fp(dev, &freq);
+	//dev = OPP_MPU;
+	maxdex = (opp_get_opp_count_fp(OPP_MPU)-1);
+	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	def_max_rate = opp->rate;
 	
 	buf = (char *)vmalloc(BUF_SIZE);
@@ -149,15 +149,15 @@ static int __init opptimizer_init(void)
 static void __exit opptimizer_exit(void)
 {
 	unsigned long freq = ULONG_MAX;
-	struct device *dev;
+	//struct device *dev;
 	struct omap_opp *opp;
 	
 	remove_proc_entry("opptimizer", NULL);
 	
 	vfree(buf);
 	
-	dev = OPP_MPU;
-	opp = opp_find_freq_floor_fp(dev, &freq);
+	//dev = OPP_MPU;
+	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	opp->rate = def_max_rate;
 	freq_table[maxdex].frequency = policy->max = policy->cpuinfo.max_freq =
 	policy->user_policy.max = def_max_rate / 1000;
