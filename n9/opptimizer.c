@@ -1,22 +1,13 @@
 /*
- opptimizer.ko - The OPP Mannagement API
- version 0.1-beta1 - 12-14-11
- by Jeffrey Kawika Patricio <jkp@tekahuna.net>
+ opptimizer_n9.ko - The OPP Mannagement API
+ version 0.1-alpha3 
+ by Lance Colton <lance.colton@gmail.com>
  License: GNU GPLv3
  <http://www.gnu.org/licenses/gpl-3.0.html>
  
- Project site:
- http://code.google.com/p/opptimizer/
+ Latest Source & changelog:
+ https://gitorious.org/opptimizer-n9/opptimizer-n9
  
- Changelog:
- 
- version 0.1-beta1 - 12-14-11
- - Renamed to OPPtimizer
- - Cleaned up code to work on OMAP2+ w/kernel 2.6.35-7 and greater
- - Build System
- 
- version 0.1-alpha - 11-11-11
- - Initial working build.
  */
 
 #include <linux/module.h>
@@ -31,12 +22,12 @@
 
 #include "../symsearch/symsearch.h"
 
-#define DRIVER_AUTHOR "Jeffrey Kawika Patricio <jkp@tekahuna.net>\n"
+#define DRIVER_AUTHOR "Lance Colton <lance.colton@gmail.com>\n"
 #define DRIVER_DESCRIPTION "opptimizer.ko - The OPP Management API\n\
-code.google.com/p/opptimizer for more info\n\
-This modules makes use of SYMSEARCH by Skrilax_CZ\n\
-Inspire by Milestone Overclock by Tiago Sousa\n"
-#define DRIVER_VERSION "0.1-beta1"
+https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
+This module uses SYMSEARCH by Skrilax_CZ\n\
+Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
+#define DRIVER_VERSION "0.1-alpha3"
 
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -78,10 +69,8 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 {
 	int ret = 0;
 	unsigned long freq = ULONG_MAX;
-	//struct device *dev;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
 
-	//dev = OPP_MPU;
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	if (IS_ERR(opp)) {
 		ret = 0;
@@ -95,7 +84,6 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 						 unsigned long len, void *data)
 {
 	unsigned long rate, freq = ULONG_MAX;
-	//struct device *dev;
 	struct omap_opp *opp;
 	
 	if(!len || len >= BUF_SIZE)
@@ -104,14 +92,16 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		return -EFAULT;
 	buf[len] = 0;
 	if(sscanf(buf, "%lu", &rate) == 1) {
-		//dev = OPP_MPU;
 		opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 		if (IS_ERR(opp)) {
 			return -ENODEV;
 		}
-		opp->rate = rate;
+		
 		freq_table[maxdex].frequency = policy->max = policy->cpuinfo.max_freq =
 			policy->user_policy.max = rate / 1000;
+			
+		opp->rate = rate;
+
 	} else
 		printk(KERN_INFO "opptimizer: incorrect parameters\n");
 	return len;
@@ -120,7 +110,6 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 static int __init opptimizer_init(void)
 {
 	unsigned long freq = ULONG_MAX;
-	//struct device *dev;
 	struct omap_opp *opp;
 	struct proc_dir_entry *proc_entry;
 	
@@ -133,7 +122,6 @@ static int __init opptimizer_init(void)
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
 	
-	//dev = OPP_MPU;
 	maxdex = (opp_get_opp_count_fp(OPP_MPU)-1);
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	def_max_rate = opp->rate;
@@ -149,18 +137,16 @@ static int __init opptimizer_init(void)
 static void __exit opptimizer_exit(void)
 {
 	unsigned long freq = ULONG_MAX;
-	//struct device *dev;
 	struct omap_opp *opp;
 	
 	remove_proc_entry("opptimizer", NULL);
 	
 	vfree(buf);
 	
-	//dev = OPP_MPU;
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	opp->rate = def_max_rate;
 	freq_table[maxdex].frequency = policy->max = policy->cpuinfo.max_freq =
-	policy->user_policy.max = def_max_rate / 1000;
+	  policy->user_policy.max = def_max_rate / 1000;
 	
 	printk(KERN_INFO " opptimizer: Reseting values to default... Goodbye!\n");
 };
