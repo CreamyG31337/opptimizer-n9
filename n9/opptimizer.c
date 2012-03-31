@@ -35,12 +35,15 @@ MODULE_DESCRIPTION(DRIVER_DESCRIPTION);
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL");
 
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, opp_get_opp_count_fp, enum opp_t opp_type);
+// opp.c
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
+						opp_get_opp_count_fp, enum opp_t opp_type);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *, 
-			opp_find_freq_floor_fp, enum opp_t opp_type, unsigned long *freq);
+						opp_find_freq_floor_fp, enum opp_t opp_type, unsigned long *freq);
 
-static int maxdex;
-static unsigned long def_max_rate;
+static int opp_count, enabled_opp_count, main_index, cpufreq_index;
+
+unsigned long default_max_rate;
 
 static struct cpufreq_frequency_table *freq_table;
 static struct cpufreq_policy *policy;
@@ -75,7 +78,11 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 	if (IS_ERR(opp)) {
 		ret = 0;
 	}
-	ret += scnprintf(buffer+ret, count-ret, "%lu\n", opp->rate);
+	ret += scnprintf(buffer+ret, count-ret, "opp rate: %lu\n", opp->rate);
+	ret += scnprintf(buffer+ret, count-ret, "freq table [0]: %u\n", freq_table[0].frequency);
+	ret += scnprintf(buffer+ret, count-ret, "policy->max: %u\n", policy->max);
+	ret += scnprintf(buffer+ret, count-ret, "cpuinfo.max_freq: %u\n", policy->cpuinfo.max_freq);
+	ret += scnprintf(buffer+ret, count-ret, "user_policy.max: %u\n", policy->user_policy.max);
 	ret += scnprintf(buffer+ret, count+ret, "%s\n", DRIVER_VERSION);
 	return ret;
 };
@@ -83,8 +90,8 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 						 unsigned long len, void *data)
 {
-	unsigned long rate, freq = ULONG_MAX;
-	struct omap_opp *opp;
+	unsigned long temp_rate, rate, freq = ULONG_MAX;
+	struct omap_opp *opp = ERR_PTR(-ENODEV);
 	
 	if(!len || len >= BUF_SIZE)
 		return -ENOSPC;
@@ -97,11 +104,19 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			return -ENODEV;
 		}
 		
-		freq_table[maxdex].frequency = policy->max = policy->cpuinfo.max_freq =
-			policy->user_policy.max = rate / 1000;
+		temp_rate = policy->user_policy.min;
+		
+		freq_table[0].frequency =
+				policy->max = policy->cpuinfo.max_freq =
+				policy->user_policy.max = rate / 1000;
+		freq_table[3].frequency = policy->min =
+				policy->cpuinfo.min_freq =
+				policy->user_policy.min = rate / 1000;
 			
 		opp->rate = rate;
-
+		
+		freq_table[3].frequency = policy->min = policy->cpuinfo.min_freq =
+				policy->user_policy.min = temp_rate;
 	} else
 		printk(KERN_INFO "opptimizer: incorrect parameters\n");
 	return len;
@@ -110,7 +125,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 static int __init opptimizer_init(void)
 {
 	unsigned long freq = ULONG_MAX;
-	struct omap_opp *opp;
+	struct omap_opp *opp = ERR_PTR(-ENODEV);
 	struct proc_dir_entry *proc_entry;
 	
 	printk(KERN_INFO " %s %s\n", DRIVER_DESCRIPTION, DRIVER_VERSION);
@@ -122,9 +137,20 @@ static int __init opptimizer_init(void)
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
 	
-	maxdex = (opp_get_opp_count_fp(OPP_MPU)-1);
+	opp_count = enabled_opp_count = (opp_get_opp_count_fp(OPP_MPU));
+	if (enabled_opp_count == opp_count) {
+		main_index = cpufreq_index = (enabled_opp_count-1);
+	} else {
+		main_index = enabled_opp_count;
+		cpufreq_index = (enabled_opp_count-1);
+	}
+	
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
-	def_max_rate = opp->rate;
+	if (!opp || IS_ERR(opp)) {
+		return -ENODEV;
+	}
+	
+	default_max_rate = opp->rate;
 	
 	buf = (char *)vmalloc(BUF_SIZE);
 	
@@ -136,18 +162,30 @@ static int __init opptimizer_init(void)
 
 static void __exit opptimizer_exit(void)
 {
-	unsigned long freq = ULONG_MAX;
-	struct omap_opp *opp;
+	unsigned long temp_rate, freq = ULONG_MAX;
+	struct omap_opp *opp = ERR_PTR(-ENODEV);
 	
 	remove_proc_entry("opptimizer", NULL);
 	
 	vfree(buf);
 	
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
-	opp->rate = def_max_rate;
-	freq_table[maxdex].frequency = policy->max = policy->cpuinfo.max_freq =
-	  policy->user_policy.max = def_max_rate / 1000;
+	if (!opp || IS_ERR(opp)) {
+		return;
+	}
+
+	opp->rate = default_max_rate;
 	
+	temp_rate = policy->user_policy.min;
+	freq_table[0].frequency =
+			policy->max = policy->cpuinfo.max_freq =
+			policy->user_policy.max = default_max_rate / 1000;
+	freq_table[3].frequency = policy->min =
+			policy->cpuinfo.min_freq =
+			policy->user_policy.min = default_max_rate / 1000;
+	
+	freq_table[3].frequency = policy->min = policy->cpuinfo.min_freq =
+			policy->user_policy.min = temp_rate;
 	printk(KERN_INFO " opptimizer: Reseting values to default... Goodbye!\n");
 };
 							 
