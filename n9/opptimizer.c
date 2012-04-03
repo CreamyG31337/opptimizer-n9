@@ -157,21 +157,18 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		if (IS_ERR(opp)) {
 			return -ENODEV;
 		}
-		
-		temp_rate = policy->user_policy.min;
-		
+		if(rate > 1700000000 || rate < 800000000){ //800mhz - 1.7ghz limits; i assume typo out of that range
+			printk(KERN_INFO "opptimizer: incorrect parameters\n");
+			return len;
+		}
+	
 		freq_table[0].frequency =
 				policy->max = policy->cpuinfo.max_freq =
 				policy->user_policy.max = rate / 1000;
-		freq_table[3].frequency = policy->min =
-				policy->cpuinfo.min_freq =
-				policy->user_policy.min = rate / 1000;
-			
-		opp->rate = rate;
 		
-		freq_table[3].frequency = policy->min = policy->cpuinfo.min_freq =
-				policy->user_policy.min = temp_rate;
-		sr_class1p5_reset_calib_fp(VDD1, true, true);
+		opp->rate = rate;//probably not the best way? why does it freeze when i change this back to 1ghz sometimes??
+		
+		sr_class1p5_reset_calib_fp(VDD1, true, true); //request smartreflex recalibrate, wipe old settings
 	} else
 		printk(KERN_INFO "opptimizer: incorrect parameters\n");
 	return len;
