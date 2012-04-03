@@ -44,8 +44,9 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *,
 						opp_find_freq_floor_fp, enum opp_t opp_type, unsigned long *freq);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long, 
 						opp_get_voltage_fp, const struct omap_opp *opp);
-//SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *, 
-//						opp_find_freq_ceil_fp, enum opp_t opp_type, unsigned long *freq);						
+//smartreflex-class1p5.c
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void, 
+						sr_class1p5_reset_calib_fp, int vdd, bool reset, bool recal);						
 //voltage.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_volt_data *, 
 						omap_get_volt_data_fp, int vdd, unsigned long volt);		
@@ -170,6 +171,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		
 		freq_table[3].frequency = policy->min = policy->cpuinfo.min_freq =
 				policy->user_policy.min = temp_rate;
+		sr_class1p5_reset_calib_fp(VDD1, true, true);
 	} else
 		printk(KERN_INFO "opptimizer: incorrect parameters\n");
 	return len;
@@ -188,7 +190,7 @@ static int __init opptimizer_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_get_opp_count, opp_get_opp_count_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_find_freq_floor, opp_find_freq_floor_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_get_voltage, opp_get_voltage_fp);	
-	//SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_find_freq_ceil, opp_find_freq_ceil_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, sr_class1p5_reset_calib, sr_class1p5_reset_calib_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_get_volt_data, omap_get_volt_data_fp);
 	
 	freq_table = cpufreq_frequency_get_table(0);
