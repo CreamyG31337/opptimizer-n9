@@ -20,6 +20,7 @@
 #include <linux/cpufreq.h>
 #include <plat/common.h>
 #include <plat/opp.h>
+#include <plat/clock.h>
 #include </usr/src/kernel-headers/arch/arm/mach-omap2/voltage.h>
 
 #include "../symsearch/symsearch.h"
@@ -29,7 +30,7 @@
 https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
 This module uses SYMSEARCH by Skrilax_CZ\n\
 Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
-#define DRIVER_VERSION "1.0"
+#define DRIVER_VERSION "1.1"
 
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -49,9 +50,19 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(void,
 						sr_class1p5_reset_calib_fp, int vdd, bool reset, bool recal);						
 //voltage.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_volt_data *, 
-						omap_get_volt_data_fp, int vdd, unsigned long volt);		
+						omap_get_volt_data_fp, int vdd, unsigned long volt);
+//cpu-omap.c
+SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, 
+						omap_getspeed_fp, unsigned int cpu);
+//clock.c
+SYMSEARCH_DECLARE_FUNCTION_STATIC(long, 
+						clk_round_rate_fp, struct clk *clk, unsigned long rate);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int, 
+						clk_set_rate_fp, struct clk *clk, unsigned long rate);						
+//clkdev.c				
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct clk*, 
+						clk_get_fp, struct device *dev, const char *con_id);
 						
-
 static int opp_count, enabled_opp_count, main_index, cpufreq_index;
 
 unsigned long default_max_rate;
@@ -59,6 +70,7 @@ unsigned long default_max_rate;
 static struct cpufreq_frequency_table *freq_table;
 static struct cpufreq_policy *policy;
 
+#define MPU_CLK		"arm_fck"
 #define BUF_SIZE PAGE_SIZE
 static char *buf;
 
@@ -77,6 +89,7 @@ struct omap_opp {
 	unsigned long u_volt;
 	u8 opp_id;	
 };
+
 /**
  * omap_volt_data - Omap voltage specific data.
  *
@@ -137,15 +150,22 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 	ret += scnprintf(buffer+ret, count-ret, "vdata->sr_error: 0x%08x\n", vdata->sr_error);
 	ret += scnprintf(buffer+ret, count-ret, "vdata->sr_val: 0x%08x\n", vdata->sr_val);
 	ret += scnprintf(buffer+ret, count-ret, "vdata->abb: %2s\n", (vdata->abb) ? "yes" : "no");
-	ret += scnprintf(buffer+ret, count+ret, "%s\n", DRIVER_VERSION);
+	ret += scnprintf(buffer+ret, count+ret, "v%s by @CreamyG31337\n", DRIVER_VERSION);
 	return ret;
 };
 
 static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 						 unsigned long len, void *data)
 {
-	unsigned long temp_rate, rate, freq = ULONG_MAX;
+	unsigned long rate, freq = ULONG_MAX;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
+	struct cpufreq_freqs freqs;
+	static struct clk *mpu_clk;
+	int ret;
+	
+	mpu_clk = clk_get_fp(NULL, MPU_CLK);
+	if (IS_ERR(mpu_clk))
+		return PTR_ERR(mpu_clk);
 	
 	if(!len || len >= BUF_SIZE)
 		return -ENOSPC;
@@ -158,15 +178,28 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			return -ENODEV;
 		}
 		if(rate > 1700000000 || rate < 800000000){ //800mhz - 1.7ghz limits; i assume typo out of that range
-			printk(KERN_INFO "opptimizer: incorrect parameters\n");
+			printk(KERN_INFO "opptimizer: rate too high or low!\n");
 			return len;
 		}
-	
-		freq_table[0].frequency =
-				policy->max = policy->cpuinfo.max_freq =
-				policy->user_policy.max = rate / 1000;
+		if (rate > 1100000000){
+			//set volts
+		}
 		
-		opp->rate = rate;//probably not the best way? why does it freeze when i change this back to 1ghz sometimes??
+		freq_table[0].frequency = policy->max = policy->cpuinfo.max_freq = policy->user_policy.max = rate / 1000; // break locks
+		freqs.cpu = 0;//only 1 cpu
+		freqs.old = omap_getspeed_fp(0); //this one is already divided by 1k, 
+		freqs.new = rate / 1000;  //clk_round_rate_fp(mpu_clk, rate) / 1000; 
+		if (freqs.old != freqs.new){
+			cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+			opp->rate = rate;//not really sure what happens when i set this directly...
+			ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
+			cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+			printk(KERN_INFO "opptimizer: switched rate from %dmhz to %dmhz \n",freqs.old / 1000,freqs.new / 1000);
+		}
+		else {
+			
+			printk(KERN_INFO "opptimizer: couldn't switch rate\n");
+		}
 		
 		sr_class1p5_reset_calib_fp(VDD1, true, true); //request smartreflex recalibrate, wipe old settings
 	} else
@@ -189,6 +222,11 @@ static int __init opptimizer_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_get_voltage, opp_get_voltage_fp);	
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, sr_class1p5_reset_calib, sr_class1p5_reset_calib_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_get_volt_data, omap_get_volt_data_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_getspeed, omap_getspeed_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, clk_round_rate, clk_round_rate_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, clk_set_rate, clk_set_rate_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, clk_get, clk_get_fp);
+	
 	
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
