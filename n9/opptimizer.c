@@ -1,6 +1,6 @@
 /*
  opptimizer_n9.ko - The OPP Mannagement API
- version 0.1-alpha3 
+ version 1.3 
  by Lance Colton <lance.colton@gmail.com>
  License: GNU GPLv3
  <http://www.gnu.org/licenses/gpl-3.0.html>
@@ -30,7 +30,7 @@
 https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
 This module uses SYMSEARCH by Skrilax_CZ\n\
 Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
-#define DRIVER_VERSION "1.2"
+#define DRIVER_VERSION "1.3"
 
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -164,7 +164,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 						 unsigned long len, void *data)
 {
 	unsigned long rate, freq = ULONG_MAX;
-	unsigned long u_volt_current = 0;
+	unsigned long u_volt_current, u_volt_req = 0;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
 	struct cpufreq_freqs freqs;
 	static struct clk *mpu_clk;
@@ -180,7 +180,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 	if(copy_from_user(buf, buffer, len))
 		return -EFAULT;
 	buf[len] = 0;
-	if(sscanf(buf, "%lu", &rate) == 1) {
+	if(sscanf(buf, "%lu %lu", &rate, &u_volt_req) >= 1) {
 		opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 		if (IS_ERR(opp)) {
 			return -ENODEV;
@@ -198,31 +198,43 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		freqs.new = rate / 1000;  //clk_round_rate_fp(mpu_clk, rate) / 1000; 
 		if (freqs.old != freqs.new){
 			cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
-			//set new voltage 1st
-			//do we need to deal with dvfs_mutex ?? as long as we do the calibrate after, i think not
-			if (rate > 1100000000){
-				struct omap_volt_data vdata_current;
-				memcpy(&vdata_current, volt_data, sizeof(vdata_current));
-				u_volt_current = omap_voltageprocessor_get_voltage_fp(0);
-				vdata_current.u_volt_calib = u_volt_current;//vdata_current now contains current volt data
-				volt_data->u_volt_calib = 1375000; 
-				volt_data->u_volt_dyn_nominal = 1375000; 
-				volt_data->u_volt_dyn_margin = 0;			
-				volt_data->sr_errminlimit = 0x16; // default is 0xF9
-				//volt_data->vp_errorgain = 0xFF;	//default is 0x16 ; hopefully 1st error will be the limit then.
-				if (volt_data->u_volt_calib != u_volt_current) {
-					omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
-				}
+		}
+		//set new voltage 1st
+		//do we need to deal with dvfs_mutex ?? as long as we do the calibrate after, i think not
+		if (rate > 1100000000 || u_volt_req != 0){
+			struct omap_volt_data vdata_current;
+			memcpy(&vdata_current, volt_data, sizeof(vdata_current));
+			u_volt_current = omap_voltageprocessor_get_voltage_fp(0);
+			vdata_current.u_volt_calib = u_volt_current;//vdata_current now contains current volt data
+			if (u_volt_req == 0){
+				u_volt_req = 1375000;//default if not specified and >= 1100mhz
 			}
-			
+			if (u_volt_req >= 1387500){
+				u_volt_req = 1387500;//max for now
+			}
+			if (u_volt_req <= 1000000){
+				u_volt_req = 1000000;//min for now
+			}
+			volt_data->u_volt_calib = u_volt_req; 
+			volt_data->u_volt_dyn_nominal = u_volt_req; 
+			volt_data->u_volt_dyn_margin = 0;
+			volt_data->sr_errminlimit = 0x16; // default is 0xF9
+			//volt_data->vp_errorgain = 0xFF;	//default is 0x16 ; hopefully 1st error will be the limit then.
+			if (volt_data->u_volt_calib != u_volt_current) {
+				omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
+			}
+		}
+		
+		if (freqs.old != freqs.new){
 			opp->rate = rate;//not really sure what happens when i set this directly...
 			ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
 			cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 			printk(KERN_INFO "opptimizer: switched rate from %dmhz to %dmhz \n",freqs.old / 1000,freqs.new / 1000);
 		}
-		else {
-			printk(KERN_INFO "opptimizer: couldn't switch rate\n");
-		}
+//		}
+//		else {
+//			printk(KERN_INFO "opptimizer: couldn't switch rate\n");
+//		}
 		
 		sr_class1p5_reset_calib_fp(VDD1, true, true); //request smartreflex recalibrate, wipe old settings
 	} else
