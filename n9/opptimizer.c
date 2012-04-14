@@ -1,6 +1,6 @@
 /*
  opptimizer_n9.ko - The OPP Mannagement API
- version 1.3 
+ version 1.4
  by Lance Colton <lance.colton@gmail.com>
  License: GNU GPLv3
  <http://www.gnu.org/licenses/gpl-3.0.html>
@@ -30,7 +30,7 @@
 https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
 This module uses SYMSEARCH by Skrilax_CZ\n\
 Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
-#define DRIVER_VERSION "1.3"
+#define DRIVER_VERSION "1.4"
 
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -199,6 +199,11 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		if (freqs.old != freqs.new){
 			cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 		}
+		if (freqs.new < freqs.old){
+			//set rate before (probably) lowering voltage
+			opp->rate = rate;//not really sure what happens when i set this directly...
+			ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
+		}
 		//set new voltage 1st
 		//do we need to deal with dvfs_mutex ?? as long as we do the calibrate after, i think not
 		if (rate > 1100000000 || u_volt_req != 0){
@@ -224,10 +229,12 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 				omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
 			}
 		}
-		
-		if (freqs.old != freqs.new){
+		if (freqs.new > freqs.old){
+			//set rate after raising voltage
 			opp->rate = rate;//not really sure what happens when i set this directly...
 			ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
+		}		
+		if (freqs.old != freqs.new){
 			cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 			printk(KERN_INFO "opptimizer: switched rate from %dmhz to %dmhz \n",freqs.old / 1000,freqs.new / 1000);
 		}
