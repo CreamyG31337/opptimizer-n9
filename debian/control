@@ -1,0 +1,16 @@
+Source: opptimizer
+Section: utils
+XB-Maemo-Flags: visible
+Priority: optional
+Maintainer: Lance Colton <lance.colton@gmail.com>
+Build-Depends: debhelper (>= 7), kernel-headers (= 2.6.32-20115101+0m7), libcreds2-dev, aegis-builder, openssl, bsdmainutils
+Standards-Version: 3.7.3
+Homepage: http://www.appcheck.net
+
+Package: opptimizer
+XSBC-Maemo-Display-Name: Opptimizer (core)
+Architecture: armel
+Depends: ${shlibs:Depends}, ${misc:Depends}, kernel (= 2.6.32-20115101+0m7), aegis-global-tokens, module-init-tools
+XB-Maemo-Flags: visible
+Description: Overclock your N9
+ This package provides the kernel-side components for overclocking.

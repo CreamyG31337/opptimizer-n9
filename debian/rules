@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+%:
+	dh  $@
+
+override_dh_installmodules:
+
+override_dh_builddeb:
+	dh_builddeb
+	aegis-deb-add -control debian/opptimizer/DEBIAN/control .. debian/opptimizer.aegis=_aegis
