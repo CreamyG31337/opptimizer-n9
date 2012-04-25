@@ -1,6 +1,6 @@
 /*
  opptimizer_n9.ko - The OPP Mannagement API
- version 1.4
+ version 1.5
  by Lance Colton <lance.colton@gmail.com>
  License: GNU GPLv3
  <http://www.gnu.org/licenses/gpl-3.0.html>
@@ -30,7 +30,7 @@
 https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
 This module uses SYMSEARCH by Skrilax_CZ\n\
 Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
-#define DRIVER_VERSION "1.4"
+#define DRIVER_VERSION "1.5"
 
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -71,6 +71,8 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct clk*,
 static int opp_count, enabled_opp_count, main_index, cpufreq_index;
 
 unsigned long default_max_rate;
+
+struct omap_volt_data default_vdata;
 
 static struct cpufreq_frequency_table *freq_table;
 static struct cpufreq_policy *policy;
@@ -145,7 +147,7 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 	ret += scnprintf(buffer+ret, count-ret, "policy->max: %u\n", policy->max);
 	ret += scnprintf(buffer+ret, count-ret, "cpuinfo.max_freq: %u\n", policy->cpuinfo.max_freq);
 	ret += scnprintf(buffer+ret, count-ret, "user_policy.max: %u\n", policy->user_policy.max);
-	ret += scnprintf(buffer+ret, count-ret, "omap_voltageprocessor_get_voltage_fp: %lu\n", omap_voltageprocessor_get_voltage_fp(0));
+	ret += scnprintf(buffer+ret, count-ret, "omap_voltageprocessor_get_voltage: %lu\n", omap_voltageprocessor_get_voltage_fp(0));
 	ret += scnprintf(buffer+ret, count-ret, "vdata->u_volt_nominal: %10ld\n", vdata->u_volt_nominal);
 	ret += scnprintf(buffer+ret, count-ret, "vdata->u_volt_dyn_nominal: %10ld\n", vdata->u_volt_dyn_nominal);
 	ret += scnprintf(buffer+ret, count-ret, "vdata->u_volt_dyn_margin: %10ld\n", vdata->u_volt_dyn_margin);
@@ -156,6 +158,16 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 	ret += scnprintf(buffer+ret, count-ret, "vdata->sr_error: 0x%08x\n", vdata->sr_error);
 	ret += scnprintf(buffer+ret, count-ret, "vdata->sr_val: 0x%08x\n", vdata->sr_val);
 	ret += scnprintf(buffer+ret, count-ret, "vdata->abb: %2s\n", (vdata->abb) ? "yes" : "no");
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->u_volt_nominal: %10ld\n", default_vdata.u_volt_nominal);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->u_volt_dyn_nominal: %10ld\n", default_vdata.u_volt_dyn_nominal);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->u_volt_dyn_margin: %10ld\n", default_vdata.u_volt_dyn_margin);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->u_volt_calib: %10ld\n", default_vdata.u_volt_calib);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->sr_nvalue: 0x%08x\n", default_vdata.sr_nvalue);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->sr_errminlimit: %u\n", default_vdata.sr_errminlimit);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->vp_errorgain: 0x%08x\n", default_vdata.vp_errorgain);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->sr_error: 0x%08x\n", default_vdata.sr_error);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->sr_val: 0x%08x\n", default_vdata.sr_val);
+	ret += scnprintf(buffer+ret, count-ret, "Default_vdata->abb: %2s\n", (default_vdata.abb) ? "yes" : "no");
 	ret += scnprintf(buffer+ret, count+ret, "v%s by @CreamyG31337\n", DRIVER_VERSION);
 	return ret;
 };
@@ -181,7 +193,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		return -EFAULT;
 	buf[len] = 0;
 	if(sscanf(buf, "%lu %lu", &rate, &u_volt_req) >= 1) {
-		opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
+		opp = opp_find_freq_floor_fp(OPP_MPU, &freq);//this will get the highest speed one
 		if (IS_ERR(opp)) {
 			return -ENODEV;
 		}
@@ -190,7 +202,6 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			printk(KERN_INFO "opptimizer: rate too high or low!\n");
 			return len;
 		}
-
 		
 		freq_table[0].frequency = policy->max = policy->cpuinfo.max_freq = policy->user_policy.max = rate / 1000; // break locks
 		freqs.cpu = 0;//only 1 cpu
@@ -206,22 +217,19 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		}
 		//set new voltage 1st
 		//do we need to deal with dvfs_mutex ?? as long as we do the calibrate after, i think not
-		if (rate > 1100000000 || u_volt_req != 0){
+		if (u_volt_req != 0){
 			struct omap_volt_data vdata_current;
 			memcpy(&vdata_current, volt_data, sizeof(vdata_current));
-			u_volt_current = omap_voltageprocessor_get_voltage_fp(0);
+			u_volt_current = omap_voltageprocessor_get_voltage_fp(0);//why am i doing this??
 			vdata_current.u_volt_calib = u_volt_current;//vdata_current now contains current volt data
-			if (u_volt_req == 0){
-				u_volt_req = 1375000;//default if not specified and >= 1100mhz
-			}
-			if (u_volt_req >= 1387500){
-				u_volt_req = 1387500;//max for now
+			if (u_volt_req >= 1425000){
+				u_volt_req = 1425000;//max for now
 			}
 			if (u_volt_req <= 1000000){
 				u_volt_req = 1000000;//min for now
 			}
-			volt_data->u_volt_calib = u_volt_req; 
-			volt_data->u_volt_dyn_nominal = u_volt_req; 
+			volt_data->u_volt_calib = u_volt_req;
+			volt_data->u_volt_dyn_nominal = u_volt_req;
 			volt_data->u_volt_dyn_margin = 0;
 			volt_data->sr_errminlimit = 0x16; // default is 0xF9
 			//volt_data->vp_errorgain = 0xFF;	//default is 0x16 ; hopefully 1st error will be the limit then.
@@ -229,6 +237,21 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 				omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
 			}
 		}
+		else{//fix SR, set back to default voltage
+			struct omap_volt_data vdata_current;
+			memcpy(&vdata_current, volt_data, sizeof(vdata_current));
+			u_volt_current = omap_voltageprocessor_get_voltage_fp(0);
+			vdata_current.u_volt_calib = u_volt_current;
+			volt_data->u_volt_calib = default_vdata.u_volt_calib;
+			volt_data->u_volt_dyn_nominal = default_vdata.u_volt_dyn_nominal;
+			volt_data->u_volt_dyn_margin = 50000;
+			volt_data->sr_errminlimit = 0x16;
+			if (default_vdata.u_volt_calib != u_volt_current) {
+				printk(KERN_INFO "opptimizer: returning to default voltage\n");
+				omap_voltage_scale_fp(VDD1, &default_vdata, &vdata_current);
+			}
+		}
+			
 		if (freqs.new > freqs.old){
 			//set rate after raising voltage
 			opp->rate = rate;//not really sure what happens when i set this directly...
@@ -255,6 +278,8 @@ static int __init opptimizer_init(void)
 	unsigned long freq = ULONG_MAX;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
 	struct proc_dir_entry *proc_entry;
+	struct omap_volt_data *volt_data;
+
 	
 	printk(KERN_INFO " %s %s\n", DRIVER_DESCRIPTION, DRIVER_VERSION);
 	printk(KERN_INFO " Created by %s\n", DRIVER_AUTHOR);
@@ -271,11 +296,9 @@ static int __init opptimizer_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_voltageprocessor_get_voltage, omap_voltageprocessor_get_voltage_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_voltage_scale, omap_voltage_scale_fp);
 	
-	
-	
-	
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
+
 	
 	opp_count = enabled_opp_count = (opp_get_opp_count_fp(OPP_MPU));
 	if (enabled_opp_count == opp_count) {
@@ -292,6 +315,10 @@ static int __init opptimizer_init(void)
 	
 	default_max_rate = opp->rate;
 	
+	volt_data = omap_get_volt_data_fp(0, opp_get_voltage_fp(opp));
+	
+	memcpy(&default_vdata, volt_data, sizeof(default_vdata));
+	
 	buf = (char *)vmalloc(BUF_SIZE);
 	
 	proc_entry = create_proc_read_entry("opptimizer", 0644, NULL, proc_opptimizer_read, NULL);
@@ -304,6 +331,7 @@ static void __exit opptimizer_exit(void)
 {
 	unsigned long temp_rate, freq = ULONG_MAX;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
+	struct omap_volt_data *vdata_current;
 	
 	remove_proc_entry("opptimizer", NULL);
 	
@@ -313,19 +341,28 @@ static void __exit opptimizer_exit(void)
 	if (!opp || IS_ERR(opp)) {
 		return;
 	}
+	
+	vdata_current = omap_get_volt_data_fp(0, opp_get_voltage_fp(opp));
 
-	opp->rate = default_max_rate;
-	
-	temp_rate = policy->user_policy.min;
-	freq_table[0].frequency =
+	if(opp->rate < default_max_rate){
+		//change voltage 1st because we are actually speeding up
+		if (default_vdata.u_volt_calib != vdata_current->u_volt_calib) {
+			omap_voltage_scale_fp(VDD1, &default_vdata, vdata_current);
+		}
+		opp->rate = default_max_rate;	
+		freq_table[0].frequency =
 			policy->max = policy->cpuinfo.max_freq =
-			policy->user_policy.max = default_max_rate / 1000;
-	freq_table[3].frequency = policy->min =
-			policy->cpuinfo.min_freq =
-			policy->user_policy.min = default_max_rate / 1000;
-	
-	freq_table[3].frequency = policy->min = policy->cpuinfo.min_freq =
-			policy->user_policy.min = temp_rate;
+			policy->user_policy.max = default_max_rate / 1000;		
+	}else{
+		//change voltage 2nd because we need to slow down first
+		opp->rate = default_max_rate;	
+		freq_table[0].frequency =
+			policy->max = policy->cpuinfo.max_freq =
+			policy->user_policy.max = default_max_rate / 1000;		
+		if (default_vdata.u_volt_calib != vdata_current->u_volt_calib) {
+			omap_voltage_scale_fp(VDD1, &default_vdata, vdata_current);
+		}
+	}
 	printk(KERN_INFO " opptimizer: Reseting values to default... Goodbye!\n");
 };
 							 
