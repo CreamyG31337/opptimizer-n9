@@ -1,16 +1,19 @@
-KERNEL_BUILD := /usr/src/kernel-headers
-EXTRA_CFLAGS :=
-FILENAME := opptimizer
+SHELL=/bin/sh
+obj-m := opptimizer.o
+KBUILD_EXTRA_SYMBOLS += "$(PWD)/../symsearch/Module.symvers"
+KDIR := /usr/src/kernel-headers
+INSTALL=install
+INSTALL_PROGRAM=$(INSTALL)
 
-obj-m += $(FILENAME).o
+.PHONY: all clean
 
-all:
-	make -C $(KERNEL_BUILD) ARCH=arm M=$(PWD) \
-	KBUILD_EXTRA_SYMBOLS=/home/lance/opptimizer1/symsearch/n9/Module.symvers \
-	modules
-	strip --strip-debug $(FILENAME).ko
-	mv $(FILENAME).ko $(FILENAME)_n9.ko
+all: opptimizer.ko
+
+opptimizer.ko: opptimizer.c opp_info.h ../symsearch/Module.symvers
+	$(MAKE) -C "$(KDIR)" M="$(PWD)"
+
+install: opptimizer.ko
+	$(INSTALL_PROGRAM) -D -m 0644 opptimizer.ko "$(DESTDIR)/lib/modules/2.6.32.48-dfl61-20115101/opptimizer.ko"
 
 clean:
-	make -C $(KERNEL_BUILD) M=$(PWD) clean 2> /dev/null
-	rm -f modules.order *~
+	$(MAKE) -C "$(KDIR)" M="$(PWD)" clean

@@ -1,0 +1,4 @@
+#!/bin/sh -e
+/sbin/modprobe -rq opptimizer symsearch || true
+#DEBHELPER#
+exit 0

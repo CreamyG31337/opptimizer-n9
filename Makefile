@@ -1,16 +1,6 @@
-SUBDIRS = n9
-.PHONY: $(SUBDIRS)
+.PHONY: all clean install
 
-all:	$(SUBDIRS)
-
-n9:
-	cd n9 && make
-
-clean_n9:
-	cd n9 && make clean
-
-clean:	clean_n9
-	rm -f *~
-
-dist:
-	tar cvfz ../opptimizer.tar.gz ../opptimizer/
+all clean install:
+	cd symsearch && $(MAKE) $@
+	cd opptimizer && $(MAKE) $@
+	cd loader && $(MAKE) $@
