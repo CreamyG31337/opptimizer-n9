@@ -1,19 +1,18 @@
-SHELL=/bin/sh
-obj-m := symsearch.o
-symsearch-y := search.o hijack.o
-KDIR := /usr/src/kernel-headers
-INSTALL=install
-INSTALL_PROGRAM=$(INSTALL)
+SUBDIRS = n9
+.PHONY: $(SUBDIRS)
 
-.PHONY: all install clean
+all:	$(SUBDIRS)
 
-all: symsearch.ko
+n9:
+	cd n9 && make
 
-symsearch.ko: search.c hijack.c symsearch.h
-	$(MAKE) -C "$(KDIR)" M="$(PWD)"
+clean_n9:
+	cd n9 && make clean
 
-install: symsearch.ko
-	$(INSTALL_PROGRAM) -D -m 0644 symsearch.ko "$(DESTDIR)/lib/modules/2.6.32.48-dfl61-20115101/symsearch.ko"	
 
-clean:
-	$(MAKE) -C "$(KDIR)" M="$(PWD)" clean
+
+clean:	clean_n9
+	rm -f *~
+
+dist:
+	tar cvfz ../symsearch.tar.gz ../symsearch/

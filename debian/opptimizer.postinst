@@ -1,3 +1,0 @@
-#!/bin/sh -e
-/sbin/depmod -a 2.6.32.48-dfl61-20115101 || true
-#DEBHELPER#
