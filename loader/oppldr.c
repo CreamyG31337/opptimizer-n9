@@ -40,7 +40,7 @@
  */
 
 static int opp_confine_to_sys_module(void);
-static int opp_invoke(const char *tgt, char *args[]);
+static int opp_load_module(const char *module);
 static int opp_whitelist_module(const void *hash);
 
 /*
@@ -65,29 +65,26 @@ static int opp_confine_to_sys_module(void)
     return 0;
 }
 
-static int opp_invoke(const char *tgt, char *args[])
+static int opp_load_module(const char *module)
 {
+    const char *args[] = { OPP_MODPROBE, module, NULL };
+    char *env[] = { NULL };
     posix_spawn_file_actions_t act;
     pid_t pid;
     int st;
     int rv;
 
-    /* Invoke the specified process */
+    /* Invoke modprobe, suppressing error output and clearing the env. */
     rv = posix_spawn_file_actions_init(&act);
+    if (rv == 0) {
+        rv = -posix_spawn_file_actions_addopen(&act, STDERR_FILENO,
+            OPP_DEVNULL, O_WRONLY, 0);
+        if (rv == 0)
+            rv = -posix_spawn(&pid, args[0], &act, NULL, (char **)args, env);
+        posix_spawn_file_actions_destroy(&act);
+    }
     if (rv != 0)
-        return -rv;
-    rv = -posix_spawn_file_actions_addopen(&act, STDOUT_FILENO,
-        OPP_DEVNULL, O_WRONLY, 0);
-    if (rv != 0)
-        goto fault;
-    rv = -posix_spawn_file_actions_adddup2(&act, STDOUT_FILENO,
-        STDERR_FILENO);
-    if (rv != 0)
-        goto fault;
-    rv = -posix_spawn(&pid, tgt, &act, NULL, args, environ);
-    posix_spawn_file_actions_destroy(&act);
-    if (rv != 0)
-        goto fault;
+        return rv;
 
     /* Wait for the process to complete */
     for (; ; ) {
@@ -98,11 +95,6 @@ static int opp_invoke(const char *tgt, char *args[])
         }
         return WEXITSTATUS(st);
     }
-
-    /* Handle errors */
-fault:
-    posix_spawn_file_actions_destroy(&act);
-    return rv;
 }
 
 static int opp_whitelist_module(const void *hash)
@@ -133,8 +125,6 @@ static int opp_whitelist_module(const void *hash)
 int main(int argc, char *argv[])
 {
     const char *appName = program_invocation_short_name;
-    char modName[] = OPP_TARGET_MODULE;
-    char *args[3];
     int rv;
     struct stat st;
 
@@ -158,10 +148,7 @@ int main(int argc, char *argv[])
         goto fault;
 
     /* Load the required module */
-    args[0] = OPP_MODPROBE;
-    args[1] = modName;
-    args[2] = NULL;
-    rv = opp_invoke(args[0], args);
+    rv = opp_load_module(OPP_TARGET_MODULE);
     if (rv < 0)
         goto fault;
     if (rv > 0) {

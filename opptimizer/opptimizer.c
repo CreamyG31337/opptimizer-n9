@@ -1,6 +1,6 @@
 /*
  opptimizer_n9.ko - The OPP Mannagement API
- version 1.5
+ version 1.5.2
  by Lance Colton <lance.colton@gmail.com>
  License: GNU GPLv3
  <http://www.gnu.org/licenses/gpl-3.0.html>
@@ -30,7 +30,7 @@
 https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
 This module uses SYMSEARCH by Skrilax_CZ\n\
 Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
-#define DRIVER_VERSION "1.5"
+#define DRIVER_VERSION "1.5.2"
 
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -242,7 +242,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			volt_data->sr_errminlimit = 0x16; // default is 0xF9
 			//volt_data->vp_errorgain = 0xFF;	//default is 0x16 ; hopefully 1st error will be the limit then.
 			if (volt_data->u_volt_calib != u_volt_current) {
-				//omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
+				omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
 			}
 			vc_setup_on_voltage_fp(VDD1, volt_data->u_volt_calib);
 		}
@@ -257,7 +257,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			volt_data->sr_errminlimit = default_vdata.sr_errminlimit;
 			if (default_vdata.u_volt_calib != u_volt_current) {
 				printk(KERN_INFO "opptimizer: returning to default voltage\n");
-				//omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
+				omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
 			}
 			vc_setup_on_voltage_fp(VDD1, volt_data->u_volt_calib);
 		}
