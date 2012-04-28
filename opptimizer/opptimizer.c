@@ -45,9 +45,13 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *,
 						opp_find_freq_floor_fp, enum opp_t opp_type, unsigned long *freq);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long, 
 						opp_get_voltage_fp, const struct omap_opp *opp);
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
+						opp_disable_fp, struct omap_opp *opp);				
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
+						opp_enable_fp, struct omap_opp *opp);									
 //smartreflex-class1p5.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void, 
-						sr_class1p5_reset_calib_fp, int vdd, bool reset, bool recal);						
+						sr_class1p5_reset_calib_fp, int vdd, bool reset, bool recal);
 //voltage.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long, 
 						omap_voltageprocessor_get_voltage_fp, int vp_id);
@@ -55,6 +59,9 @@ SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_volt_data *,
 						omap_get_volt_data_fp, int vdd, unsigned long volt);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int, 
 						omap_voltage_scale_fp, int vdd, struct omap_volt_data *vdata_target, struct omap_volt_data *vdata_current);						
+
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void,
+						vc_setup_on_voltage_fp, u32 vdd, unsigned long target_volt);
 						
 //cpu-omap.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, 
@@ -197,6 +204,7 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		if (IS_ERR(opp)) {
 			return -ENODEV;
 		}
+		//opp_disable_fp(opp);
 		volt_data = omap_get_volt_data_fp(0, opp_get_voltage_fp(opp));
 		if(rate > 1700000000 || rate < 800000000){ //800mhz - 1.7ghz limits; i assume typo out of that range
 			printk(KERN_INFO "opptimizer: rate too high or low!\n");
@@ -208,12 +216,12 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		freqs.old = omap_getspeed_fp(0); //this one is already divided by 1k, 
 		freqs.new = rate / 1000;  //clk_round_rate_fp(mpu_clk, rate) / 1000; 
 		if (freqs.old != freqs.new){
-			cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+			//cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 		}
 		if (freqs.new < freqs.old){
 			//set rate before (probably) lowering voltage
 			opp->rate = rate;//not really sure what happens when i set this directly...
-			ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
+			//ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
 		}
 		//set new voltage 1st
 		//do we need to deal with dvfs_mutex ?? as long as we do the calibrate after, i think not
@@ -234,8 +242,9 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			volt_data->sr_errminlimit = 0x16; // default is 0xF9
 			//volt_data->vp_errorgain = 0xFF;	//default is 0x16 ; hopefully 1st error will be the limit then.
 			if (volt_data->u_volt_calib != u_volt_current) {
-				omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
+				//omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
 			}
+			vc_setup_on_voltage_fp(VDD1, volt_data->u_volt_calib);
 		}
 		else{//fix SR, set back to default voltage
 			struct omap_volt_data vdata_current;
@@ -244,28 +253,25 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			vdata_current.u_volt_calib = u_volt_current;
 			volt_data->u_volt_calib = default_vdata.u_volt_calib;
 			volt_data->u_volt_dyn_nominal = default_vdata.u_volt_dyn_nominal;
-			volt_data->u_volt_dyn_margin = 50000;
-			volt_data->sr_errminlimit = 0x16;
+			volt_data->u_volt_dyn_margin = default_vdata.u_volt_dyn_margin;
+			volt_data->sr_errminlimit = default_vdata.sr_errminlimit;
 			if (default_vdata.u_volt_calib != u_volt_current) {
 				printk(KERN_INFO "opptimizer: returning to default voltage\n");
-				omap_voltage_scale_fp(VDD1, &default_vdata, &vdata_current);
+				//omap_voltage_scale_fp(VDD1, volt_data, &vdata_current);
 			}
+			vc_setup_on_voltage_fp(VDD1, volt_data->u_volt_calib);
 		}
 			
 		if (freqs.new > freqs.old){
 			//set rate after raising voltage
 			opp->rate = rate;//not really sure what happens when i set this directly...
-			ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
+			//ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
 		}		
 		if (freqs.old != freqs.new){
-			cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
-			printk(KERN_INFO "opptimizer: switched rate from %dmhz to %dmhz \n",freqs.old / 1000,freqs.new / 1000);
+			//cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+			printk(KERN_INFO "opptimizer: updated max rate to %dmhz \n",freqs.new / 1000);
 		}
-//		}
-//		else {
-//			printk(KERN_INFO "opptimizer: couldn't switch rate\n");
-//		}
-		
+		//opp_enable_fp(opp);
 		sr_class1p5_reset_calib_fp(VDD1, true, true); //request smartreflex recalibrate, wipe old settings
 	} else
 		printk(KERN_INFO "opptimizer: incorrect parameters\n");
@@ -295,6 +301,9 @@ static int __init opptimizer_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, clk_get, clk_get_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_voltageprocessor_get_voltage, omap_voltageprocessor_get_voltage_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_voltage_scale, omap_voltage_scale_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, vc_setup_on_voltage, vc_setup_on_voltage_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_disable, opp_disable_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_enable, opp_enable_fp);
 	
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);

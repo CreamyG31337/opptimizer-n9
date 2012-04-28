@@ -65,4 +65,9 @@ static int __init symsearch_init(void)
 	return 0;
 }
 
+static void __exit symsearch_exit(void){
+	
+};
+
 module_init(symsearch_init);
+module_exit(symsearch_exit);
