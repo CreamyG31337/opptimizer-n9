@@ -1,15 +1,14 @@
 /*
  opptimizer_n9.ko - The OPP Mannagement API
- version 1.5.2
+ version 1.5.3
  by Lance Colton <lance.colton@gmail.com>
  License: GNU GPLv3
  <http://www.gnu.org/licenses/gpl-3.0.html>
- 
+
  Latest Source & changelog:
  https://gitorious.org/opptimizer-n9/opptimizer-n9
- 
- */
 
+ */
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/version.h>
@@ -22,6 +21,7 @@
 #include <plat/opp.h>
 #include <plat/clock.h>
 #include </usr/src/kernel-headers/arch/arm/mach-omap2/voltage.h>
+#include <linux/smp_lock.h>
 
 #include "../symsearch/symsearch.h"
 
@@ -30,8 +30,7 @@
 https://gitorious.org/opptimizer-n9/opptimizer-n9 for source\n\
 This module uses SYMSEARCH by Skrilax_CZ\n\
 Made possible by Jeffrey Kawika Patricio and Tiago Sousa\n"
-#define DRIVER_VERSION "1.5.2"
-
+#define DRIVER_VERSION "1.5.3"
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESCRIPTION);
@@ -41,40 +40,41 @@ MODULE_LICENSE("GPL");
 // opp.c
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
 						opp_get_opp_count_fp, enum opp_t opp_type);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_opp *,
 						opp_find_freq_floor_fp, enum opp_t opp_type, unsigned long *freq);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long,
 						opp_get_voltage_fp, const struct omap_opp *opp);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
-						opp_disable_fp, struct omap_opp *opp);				
+						opp_disable_fp, struct omap_opp *opp);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
-						opp_enable_fp, struct omap_opp *opp);									
+						opp_enable_fp, struct omap_opp *opp);
 //smartreflex-class1p5.c
-SYMSEARCH_DECLARE_FUNCTION_STATIC(void, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(void,
 						sr_class1p5_reset_calib_fp, int vdd, bool reset, bool recal);
 //voltage.c
-SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long,
 						omap_voltageprocessor_get_voltage_fp, int vp_id);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_volt_data *, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct omap_volt_data *,
 						omap_get_volt_data_fp, int vdd, unsigned long volt);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, 
-						omap_voltage_scale_fp, int vdd, struct omap_volt_data *vdata_target, struct omap_volt_data *vdata_current);						
-
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
+						omap_voltage_scale_fp, int vdd, struct omap_volt_data *vdata_target, struct omap_volt_data *vdata_current);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(void,
 						vc_setup_on_voltage_fp, u32 vdd, unsigned long target_volt);
-						
 //cpu-omap.c
-SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned int,
 						omap_getspeed_fp, unsigned int cpu);
 //clock.c
-SYMSEARCH_DECLARE_FUNCTION_STATIC(long, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(long,
 						clk_round_rate_fp, struct clk *clk, unsigned long rate);
-SYMSEARCH_DECLARE_FUNCTION_STATIC(int, 
-						clk_set_rate_fp, struct clk *clk, unsigned long rate);						
-//clkdev.c				
-SYMSEARCH_DECLARE_FUNCTION_STATIC(struct clk*, 
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
+						clk_set_rate_fp, struct clk *clk, unsigned long rate);
+//clkdev.c
+SYMSEARCH_DECLARE_FUNCTION_STATIC(struct clk*,
 						clk_get_fp, struct device *dev, const char *con_id);
-						
+//cpufreq.h
+SYMSEARCH_DECLARE_FUNCTION_STATIC(int,
+						cpufreq_update_policy_fp,unsigned int cpu);
+
 static int opp_count, enabled_opp_count, main_index, cpufreq_index;
 
 unsigned long default_max_rate;
@@ -101,7 +101,7 @@ struct omap_opp {
 	bool enabled;
 	unsigned long rate;
 	unsigned long u_volt;
-	u8 opp_id;	
+	u8 opp_id;
 };
 
 /**
@@ -146,9 +146,9 @@ static int proc_opptimizer_read(char *buffer, char **buffer_location,
 	if (IS_ERR(opp)) {
 		ret = 0;
 	}
-	
+
 	vdata = omap_get_volt_data_fp(0, opp_get_voltage_fp(opp));
-	
+
 	ret += scnprintf(buffer+ret, count-ret, "opp rate: %lu\n", opp->rate);
 	ret += scnprintf(buffer+ret, count-ret, "freq table [0]: %u\n", freq_table[0].frequency);
 	ret += scnprintf(buffer+ret, count-ret, "policy->max: %u\n", policy->max);
@@ -189,11 +189,13 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 	static struct clk *mpu_clk;
 	struct omap_volt_data *volt_data;
 	int ret;
-	
+
+	lock_kernel();
+
 	mpu_clk = clk_get_fp(NULL, MPU_CLK);
 	if (IS_ERR(mpu_clk))
 		return PTR_ERR(mpu_clk);
-	
+
 	if(!len || len >= BUF_SIZE)
 		return -ENOSPC;
 	if(copy_from_user(buf, buffer, len))
@@ -210,11 +212,11 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			printk(KERN_INFO "opptimizer: rate too high or low!\n");
 			return len;
 		}
-		
+
 		freq_table[0].frequency = policy->max = policy->cpuinfo.max_freq = policy->user_policy.max = rate / 1000; // break locks
 		freqs.cpu = 0;//only 1 cpu
-		freqs.old = omap_getspeed_fp(0); //this one is already divided by 1k, 
-		freqs.new = rate / 1000;  //clk_round_rate_fp(mpu_clk, rate) / 1000; 
+		freqs.old = omap_getspeed_fp(0); //this one is already divided by 1k,
+		freqs.new = rate / 1000;  //clk_round_rate_fp(mpu_clk, rate) / 1000;
 		if (freqs.old != freqs.new){
 			//cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 		}
@@ -261,12 +263,12 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 			}
 			vc_setup_on_voltage_fp(VDD1, volt_data->u_volt_calib);
 		}
-			
+
 		if (freqs.new > freqs.old){
 			//set rate after raising voltage
 			opp->rate = rate;//not really sure what happens when i set this directly...
 			//ret = clk_set_rate_fp(mpu_clk, freqs.new * 1000);
-		}		
+		}
 		if (freqs.old != freqs.new){
 			//cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 			printk(KERN_INFO "opptimizer: updated max rate to %dmhz \n",freqs.new / 1000);
@@ -275,10 +277,17 @@ static int proc_opptimizer_write(struct file *filp, const char __user *buffer,
 		sr_class1p5_reset_calib_fp(VDD1, true, true); //request smartreflex recalibrate, wipe old settings
 	} else
 		printk(KERN_INFO "opptimizer: incorrect parameters\n");
+
+	//fix cpufreq_stats
+
+	cpufreq_update_policy_fp(0);
+
+	unlock_kernel();
+
 	return len;
 };
 
-							 
+
 static int __init opptimizer_init(void)
 {
 	unsigned long freq = ULONG_MAX;
@@ -286,13 +295,13 @@ static int __init opptimizer_init(void)
 	struct proc_dir_entry *proc_entry;
 	struct omap_volt_data *volt_data;
 
-	
+
 	printk(KERN_INFO " %s %s\n", DRIVER_DESCRIPTION, DRIVER_VERSION);
 	printk(KERN_INFO " Created by %s\n", DRIVER_AUTHOR);
 
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_get_opp_count, opp_get_opp_count_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_find_freq_floor, opp_find_freq_floor_fp);
-	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_get_voltage, opp_get_voltage_fp);	
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_get_voltage, opp_get_voltage_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, sr_class1p5_reset_calib, sr_class1p5_reset_calib_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_get_volt_data, omap_get_volt_data_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, omap_getspeed, omap_getspeed_fp);
@@ -304,11 +313,16 @@ static int __init opptimizer_init(void)
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, vc_setup_on_voltage, vc_setup_on_voltage_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_disable, opp_disable_fp);
 	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, opp_enable, opp_enable_fp);
-	
+	//SYMSEARCH_BIND_FUNCTION_TO(opptimizer, cpufreq_frequency_get_table, cpufreq_frequency_get_table_fp);
+	//SYMSEARCH_BIND_FUNCTION_TO(opptimizer, cpufreq_stats_create_table, cpufreq_stats_create_table_fp);
+	SYMSEARCH_BIND_FUNCTION_TO(opptimizer, cpufreq_update_policy, cpufreq_update_policy_fp);
+
+
+
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);
 
-	
+
 	opp_count = enabled_opp_count = (opp_get_opp_count_fp(OPP_MPU));
 	if (enabled_opp_count == opp_count) {
 		main_index = cpufreq_index = (enabled_opp_count-1);
@@ -316,20 +330,20 @@ static int __init opptimizer_init(void)
 		main_index = enabled_opp_count;
 		cpufreq_index = (enabled_opp_count-1);
 	}
-	
+
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	if (!opp || IS_ERR(opp)) {
 		return -ENODEV;
 	}
-	
+
 	default_max_rate = opp->rate;
-	
+
 	volt_data = omap_get_volt_data_fp(0, opp_get_voltage_fp(opp));
-	
+
 	memcpy(&default_vdata, volt_data, sizeof(default_vdata));
-	
+
 	buf = (char *)vmalloc(BUF_SIZE);
-	
+
 	proc_entry = create_proc_read_entry("opptimizer", 0644, NULL, proc_opptimizer_read, NULL);
 	proc_entry->write_proc = proc_opptimizer_write;
 
@@ -341,16 +355,16 @@ static void __exit opptimizer_exit(void)
 	unsigned long temp_rate, freq = ULONG_MAX;
 	struct omap_opp *opp = ERR_PTR(-ENODEV);
 	struct omap_volt_data *vdata_current;
-	
+
 	remove_proc_entry("opptimizer", NULL);
-	
+
 	vfree(buf);
-	
+
 	opp = opp_find_freq_floor_fp(OPP_MPU, &freq);
 	if (!opp || IS_ERR(opp)) {
 		return;
 	}
-	
+
 	vdata_current = omap_get_volt_data_fp(0, opp_get_voltage_fp(opp));
 
 	if(opp->rate < default_max_rate){
@@ -358,23 +372,23 @@ static void __exit opptimizer_exit(void)
 		if (default_vdata.u_volt_calib != vdata_current->u_volt_calib) {
 			omap_voltage_scale_fp(VDD1, &default_vdata, vdata_current);
 		}
-		opp->rate = default_max_rate;	
+		opp->rate = default_max_rate;
 		freq_table[0].frequency =
 			policy->max = policy->cpuinfo.max_freq =
-			policy->user_policy.max = default_max_rate / 1000;		
+			policy->user_policy.max = default_max_rate / 1000;
 	}else{
 		//change voltage 2nd because we need to slow down first
-		opp->rate = default_max_rate;	
+		opp->rate = default_max_rate;
 		freq_table[0].frequency =
 			policy->max = policy->cpuinfo.max_freq =
-			policy->user_policy.max = default_max_rate / 1000;		
+			policy->user_policy.max = default_max_rate / 1000;
 		if (default_vdata.u_volt_calib != vdata_current->u_volt_calib) {
 			omap_voltage_scale_fp(VDD1, &default_vdata, vdata_current);
 		}
 	}
 	printk(KERN_INFO " opptimizer: Reseting values to default... Goodbye!\n");
 };
-							 
+
 module_init(opptimizer_init);
 module_exit(opptimizer_exit);
 

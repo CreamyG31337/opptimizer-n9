@@ -1,6 +1,13 @@
+opptimizer (1.5.3) unstable; urgency=low
+
+  * added extra locking to stop crashing on downclock, not sure if really fixed but hasn't crashed in a long time 
+  * tried to get stats table to update but doesn't work yet
+
+ -- Lance Colton <lance.colton@gmail.com>  Sat, 28 Apr 2012 13:30:00 -0600
+ 
 opptimizer (1.5.2) unstable; urgency=low
 
-  *  Fixed minor security vulnerability in loader (itsnotabigtruck)
+  * Fixed minor security vulnerability in loader (itsnotabigtruck)
 
  -- Lance Colton <lance.colton@gmail.com>  Sat, 28 Apr 2012 13:30:00 -0600
  
