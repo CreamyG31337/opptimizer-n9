@@ -1,3 +1,14 @@
+opptimizer (1.5.4) unstable; urgency=low
+
+  * Fixed critical kernel lock bug - unlock_kernel() now called on all error paths
+  * Added NULL pointer checks for omap_get_volt_data_fp() return values
+  * Added NULL pointer checks for freq_table and policy before use
+  * Fixed buffer overflow bug in proc_opptimizer_read() (count+ret -> count-ret)
+  * Improved code comments explaining reverse engineering approach and rationale
+  * Better documentation of voltage/frequency ordering and magic numbers
+
+ -- Lance Colton <lance.colton@gmail.com>  Tue, 13 Jan 2026 03:05:24 -0600
+
 opptimizer (1.5.3) unstable; urgency=low
 
   * added extra locking to stop crashing on downclock, not sure if really fixed but hasn't crashed in a long time 
